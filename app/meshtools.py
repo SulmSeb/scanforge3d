@@ -7,7 +7,6 @@ from pathlib import Path
 import numpy as np
 import trimesh
 
-from .markers import SHEET_H, SHEET_W
 
 
 @dataclass
@@ -73,6 +72,7 @@ def cut_below(m: trimesh.Trimesh, z: float) -> trimesh.Trimesh:
 
 
 def postprocess(mesh_path: Path, out_dir: Path, *, sheet_T: np.ndarray | None,
+                sheet_size: tuple[float, float] = (210.0, 297.0),
                 camera_centers: np.ndarray | None = None, cut_mm: float = 0.6,
                 target_longest_mm: float | None = None, max_faces: int = 400_000,
                 log=print) -> tuple[Path, MeshReport]:
@@ -86,7 +86,7 @@ def postprocess(mesh_path: Path, out_dir: Path, *, sheet_T: np.ndarray | None,
             if np.median(cz) < 0:  # sollte nicht vorkommen – zur Sicherheit umdrehen
                 m.apply_transform(np.diag([1, -1, -1, 1.0]))
         # nur den Bereich über dem Bogen behalten
-        keep = np.all(np.abs(m.vertices[:, :2]) < [SHEET_W / 2 + 20, SHEET_H / 2 + 20], axis=1)
+        keep = np.all(np.abs(m.vertices[:, :2]) < [sheet_size[0] / 2 + 20, sheet_size[1] / 2 + 20], axis=1)
         m.update_vertices(keep)
         m = cut_below(m, cut_mm)
         scaled = True

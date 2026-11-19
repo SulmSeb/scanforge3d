@@ -48,6 +48,9 @@ GUIDE = """
 <h2>So gelingt der Scan</h2>
 <ol>
 <li><b>Maßstabsbogen drucken</b> (Knopf links) – mit <i>100 % / tatsächliche Größe</i>.
+<b>A4</b> für Teile bis ca. 9 cm, <b>A3</b> für Teile bis ca. 13 cm Grundfläche (ohne A3-Drucker:
+PDF im Copyshop drucken lassen – nicht aus zwei A4-Blättern zusammenkleben, das wird ungenau).
+Größere Teile dürfen über die Stellfläche ragen, solange rundherum Marker sichtbar bleiben.
 Die Kontrolllinie mit dem Lineal prüfen: genau 100 mm.</li>
 <li>Bogen flach auf einen Tisch legen und das Teil in die Mitte stellen. Die Marker dürfen nicht verdeckt sein.</li>
 <li><b>Licht:</b> hell und gleichmäßig, am besten Tageslicht ohne direkte Sonne. Keine harten Schatten, kein Blitz.</li>
@@ -143,7 +146,7 @@ class MainWindow(QMainWindow):
         self.checks: dict[str, imageprep.ImageCheck] = {}
         self.items: dict[str, QListWidgetItem] = {}
         self.pool = QThreadPool.globalInstance()
-        self.thread: QThread | None = None
+        self._thread: QThread | None = None
         self.worker: Worker | None = None
         self.result = None
         self.t_start = 0.0
@@ -209,9 +212,14 @@ class MainWindow(QMainWindow):
         self.use_sheet.setChecked(True)
         self.use_sheet.toggled.connect(self._sheet_toggled)
         gs.addWidget(self.use_sheet, 1, 0, 1, 2)
-        b_sheet = QPushButton("Maßstabsbogen als PDF speichern…")
+        self.sheet_fmt = QComboBox()
+        self.sheet_fmt.addItems(["A4 – Teile bis ca. 9 cm", "A3 – Teile bis ca. 13 cm"])
+        self.sheet_fmt.setToolTip("Welcher Bogen beim Fotografieren benutzt wurde, erkennt das Programm "
+                                  "automatisch – diese Auswahl gilt nur fürs Drucken.")
+        gs.addWidget(self.sheet_fmt, 2, 0)
+        b_sheet = QPushButton("Bogen als PDF speichern…")
         b_sheet.clicked.connect(self._save_sheet)
-        gs.addWidget(b_sheet, 2, 0, 1, 2)
+        gs.addWidget(b_sheet, 2, 1)
         self.lbl_len = QLabel("Ohne Bogen – längste Kante (mm):")
         gs.addWidget(self.lbl_len, 3, 0)
         self.longest = QDoubleSpinBox()
@@ -388,10 +396,11 @@ class MainWindow(QMainWindow):
         self.lbl_len.setEnabled(not on)
 
     def _save_sheet(self):
-        f, _ = QFileDialog.getSaveFileName(self, "Maßstabsbogen speichern",
-                                           str(Path.home() / "ScanForge_Massstabsbogen.pdf"), "PDF (*.pdf)")
+        fmt = self.sheet_fmt.currentText()[:2]
+        f, _ = QFileDialog.getSaveFileName(self, f"Maßstabsbogen {fmt} speichern",
+                                           str(Path.home() / f"ScanForge_Massstabsbogen_{fmt}.pdf"), "PDF (*.pdf)")
         if f:
-            markers.make_sheet(Path(f))
+            markers.make_sheet(Path(f), fmt=fmt)
             open_path(Path(f))
 
     # ----- Ablauf -----
@@ -411,23 +420,30 @@ class MainWindow(QMainWindow):
                      target_longest_mm=self.longest.value() or None)
         self.logbox.clear()
         self._log(f"{APP_NAME} {VERSION} – Projekt: {ws}")
-        self.thread = QThread()
+        self._thread = QThread()
         self.worker = Worker(usable, ws, s)
-        self.worker.moveToThread(self.thread)
-        self.thread.started.connect(self.worker.run)
-        self.worker.log.connect(self._log)
-        self.worker.stage.connect(lambda n: self.stage_lbl.setText(f"<b>{n}</b> …"))
-        self.worker.progress.connect(lambda f: self.bar.setValue(int(f * 1000)))
-        self.worker.finished.connect(self._done)
-        self.worker.failed.connect(self._failed)
+        self.worker.moveToThread(self._thread)
+        self._thread.started.connect(self.worker.run)
+        q = Qt.QueuedConnection  # Oberfläche nur aus dem Hauptthread ändern
+        self.worker.log.connect(self._log, q)
+        self.worker.stage.connect(self._on_stage, q)
+        self.worker.progress.connect(self._on_progress, q)
+        self.worker.finished.connect(self._done, q)
+        self.worker.failed.connect(self._failed, q)
         for sig in (self.worker.finished, self.worker.failed):
-            sig.connect(self.thread.quit)
+            sig.connect(self._thread.quit)
         self.btn_start.setEnabled(False)
         self.btn_cancel.setEnabled(True)
         self.bar.setValue(0)
         self.t_start = time.time()
         self.timer.start()
-        self.thread.start()
+        self._thread.start()
+
+    def _on_stage(self, name: str):
+        self.stage_lbl.setText(f"<b>{name}</b> …")
+
+    def _on_progress(self, frac: float):
+        self.bar.setValue(int(frac * 1000))
 
     def _tick(self):
         el = int(time.time() - self.t_start)
@@ -489,12 +505,47 @@ class MainWindow(QMainWindow):
                 e.ignore()
                 return
             self.worker.pipe.cancel()
-            self.thread.quit()
-            self.thread.wait(3000)
+            self._thread.quit()
+            self._thread.wait(3000)
         e.accept()
 
 
+def log_dir() -> Path:
+    d = workspace_root().parent / "logs"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def install_crash_logging():
+    """Fehler, die sonst lautlos zum Absturz führen, in eine Datei schreiben."""
+    import faulthandler
+    import traceback
+    d = log_dir()
+    log_file = open(d / "scanforge.log", "a", encoding="utf-8", buffering=1)
+    log_file.write(f"\n===== Start {datetime.now():%Y-%m-%d %H:%M:%S} =====\n")
+    # Fensterprogramm (exe) hat keine Konsole: stdout/stderr sind None
+    if sys.stdout is None:
+        sys.stdout = log_file
+    if sys.stderr is None:
+        sys.stderr = log_file
+    faulthandler.enable(log_file)  # auch harte Abstürze protokollieren
+
+    def hook(etype, value, tb):
+        txt = "".join(traceback.format_exception(etype, value, tb))
+        log_file.write(txt)
+        try:
+            QMessageBox.critical(None, APP_NAME, f"Unerwarteter Fehler:\n{value}\n\n"
+                                 f"Details: {d / 'scanforge.log'}")
+        except Exception:
+            pass
+    sys.excepthook = hook
+    threading_hook = getattr(__import__("threading"), "excepthook", None)
+    if threading_hook:
+        __import__("threading").excepthook = lambda a: hook(a.exc_type, a.exc_value, a.exc_traceback)
+
+
 def run():
+    install_crash_logging()
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     app.setStyleSheet(STYLE)

@@ -157,7 +157,8 @@ class Pipeline:
         cmd = [str(exe)] + [str(a) for a in args]
         self.log("> " + " ".join(Path(cmd[0]).name if i == 0 else c for i, c in enumerate(cmd)))
         flags = 0x08000000 if os.name == "nt" else 0  # CREATE_NO_WINDOW
-        self._proc = subprocess.Popen(cmd, cwd=cwd, env=self._env(exe), stdout=subprocess.PIPE,
+        self._proc = subprocess.Popen(cmd, cwd=cwd, env=self._env(exe), stdin=subprocess.DEVNULL,
+                                      stdout=subprocess.PIPE,
                                       stderr=subprocess.STDOUT, text=True, encoding="utf-8",
                                       errors="replace", creationflags=flags)
         tail = []
@@ -266,10 +267,11 @@ class Pipeline:
         self._stage("post")
         stl, rep = meshtools.postprocess(
             mesh, ws / "ergebnis", sheet_T=align.T if align else None, camera_centers=centers,
+            sheet_size=(align.fmt.w, align.fmt.h) if align else (210.0, 297.0),
             cut_mm=self.s.cut_mm, target_longest_mm=None if align else self.s.target_longest_mm,
             log=self.log)
         self._stage_done()
-        src = ("Maßstabsbogen (±%.1f mm)" % align.rms_mm) if align else (
+        src = ("Maßstabsbogen %s (±%.1f mm)" % (align.fmt.name, align.rms_mm)) if align else (
             "manuelle Angabe" if self.s.target_longest_mm else "kein Maßstab")
         self.log(f"Fertig: {rep.size_mm[0]:.1f} × {rep.size_mm[1]:.1f} × {rep.size_mm[2]:.1f} "
                  f"{'mm' if rep.scaled else 'Einheiten'}")
