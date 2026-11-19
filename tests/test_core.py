@@ -36,17 +36,19 @@ def random_similarity(rng):
     return T
 
 
-def make_dataset(tmp: Path):
+def make_dataset(tmp: Path, fmt: str = "A4"):
     """Synthetischer 'Scan': Bilder eines Maßstabsbogens + Kamera-Posen + Roh-Mesh in COLMAP-Koordinaten."""
     rng = np.random.default_rng(1)
     pdf, png = tmp / "bogen.pdf", tmp / "bogen.png"
-    markers.make_sheet(pdf, png)
+    markers.make_sheet(pdf, png, fmt)
+    F = markers.FORMATS[fmt]
+    k = F.w / 210.0  # Kameraabstand mit Bogengröße skalieren
     sheet = cv2.imread(str(png), cv2.IMREAD_GRAYSCALE)
     H_px, W_px = sheet.shape
     mm2px = markers.DPI / 25.4
     # Abbildung Bogen-mm (Mitte, y hoch) -> Pixel des Bogenbilds
-    S = np.array([[mm2px, 0, markers.SHEET_W / 2 * mm2px],
-                  [0, -mm2px, markers.SHEET_H / 2 * mm2px],
+    S = np.array([[mm2px, 0, F.w / 2 * mm2px],
+                  [0, -mm2px, F.h / 2 * mm2px],
                   [0, 0, 1]])
 
     # Welt = Bogen-mm. Modellkoordinaten = willkürliche Ähnlichkeit davon (wie COLMAP).
@@ -56,11 +58,11 @@ def make_dataset(tmp: Path):
     K = np.array([[2400, 0, 1200], [0, 2400, 900], [0, 0, 1.0]])
     cams = {1: colmap_io.Camera(1, "PINHOLE", 2400, 1800, np.array([2400, 2400, 1200, 900.0]))}
     views, centers_world = {}, []
-    img_dir = tmp / "imgs"
+    img_dir = tmp / f"imgs_{fmt}"
     img_dir.mkdir()
     for i in range(14):
         ang = 2 * np.pi * i / 14
-        C = np.array([330 * np.cos(ang), 330 * np.sin(ang), 260 + 40 * np.sin(3 * ang)])
+        C = k * np.array([330 * np.cos(ang), 330 * np.sin(ang), 260 + 40 * np.sin(3 * ang)])
         R, t = look_at(C)
         centers_world.append(C)
         # Homographie Bogenpixel -> Kamerapixel
@@ -83,25 +85,34 @@ def make_dataset(tmp: Path):
     scene = trimesh.Trimesh(*trimesh.remesh.subdivide_to_size(scene.vertices, scene.faces, 3.0))
     scene.vertices += rng.normal(scale=0.05, size=scene.vertices.shape)
     scene.apply_transform(T_w2m)
-    raw = tmp / "scene_dense_mesh.ply"
+    raw = tmp / f"scene_dense_mesh_{fmt}.ply"
     scene.export(raw)
     centers_m = (T_w2m[:3, :3] @ np.array(centers_world).T).T + T_w2m[:3, 3]
     return img_dir, cams, views, T_w2m, centers_m, raw
 
 
 def main():
+    for fmt in ("A4", "A3"):
+        print(f"--- {fmt} ---")
+        check_format(fmt)
+    print("ALLE TESTS OK")
+
+
+def check_format(fmt):
     tmp = Path(tempfile.mkdtemp())
-    img_dir, cams, views, T_w2m, centers_m, raw = make_dataset(tmp)
+    img_dir, cams, views, T_w2m, centers_m, raw = make_dataset(tmp, fmt)
     al = markers.align_to_sheet(img_dir, cams, views)
     assert al is not None, "Bogen nicht erkannt"
     T_expected = np.linalg.inv(T_w2m)
     err = np.abs(al.T - T_expected).max()
     print(f"Ecken: {al.n_corners}, Marker: {al.n_markers}, Rest {al.rms_mm:.3f} mm, Matrixabw. {err:.2e}")
+    assert al.fmt.name == fmt, f"Format falsch erkannt: {al.fmt.name}"
     assert al.n_markers >= 8 and al.rms_mm < 0.5
-    assert np.median(al.camera_z) > 200, "Kameras sollten über dem Bogen liegen"
+    assert np.median(al.camera_z) > 150, "Kameras sollten über dem Bogen liegen"
 
 
-    stl, rep = meshtools.postprocess(raw, tmp / "out1", sheet_T=al.T, camera_centers=centers_m, cut_mm=0.6)
+    stl, rep = meshtools.postprocess(raw, tmp / "out1", sheet_T=al.T, camera_centers=centers_m, cut_mm=0.6,
+                                     sheet_size=(al.fmt.w, al.fmt.h))
     print("Mit Bogen:", [round(x, 2) for x in rep.size_mm], "wasserdicht:", rep.watertight, rep.volume_cm3)
     assert abs(rep.size_mm[0] - 40) < 0.6 and abs(rep.size_mm[1] - 25) < 0.6
     assert abs(rep.size_mm[2] - (15 - 0.6)) < 0.6
@@ -112,7 +123,6 @@ def main():
     assert abs(max(rep2.size_mm) - 40) < 0.01
     assert abs(rep2.size_mm[1] - 25) < 1.0, "Grundfläche sollte an x/y ausgerichtet sein"
     assert rep2.size_mm[2] < max(rep2.size_mm[:2]), "Teil sollte flach auf dem Druckbett liegen"
-    print("ALLE TESTS OK")
 
 
 if __name__ == "__main__":

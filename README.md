@@ -8,7 +8,7 @@ Läuft ohne spezielle Grafikkarte auf jedem 64-Bit-Windows-PC (Windows 10/11).
 
 | Funktion | Nutzen |
 |---|---|
-| **Maßstabsbogen mit ArUco-Markern** | Ausdrucken, Teil draufstellen, fotografieren – das Modell kommt automatisch in **echten mm** heraus, ohne Nachmessen |
+| **Maßstabsbogen mit ArUco-Markern (A4 oder A3)** | Ausdrucken, Teil draufstellen, fotografieren – das Modell kommt automatisch in **echten mm** heraus. Das Format wird automatisch erkannt |
 | **Automatische Druckbett-Ausrichtung** | Der Bogen definiert den Boden: Das Teil steht gerade, die Unterseite wird flach abgeschnitten und geschlossen |
 | **Foto-Ampel** | Jedes Foto wird beim Hinzufügen auf Schärfe, Helligkeit und Auflösung geprüft. Verwackelte Fotos werden aussortiert |
 | **iPhone-HEIC direkt** | Keine Umwandlung nötig, auch die Drehung wird korrekt übernommen |
@@ -18,7 +18,7 @@ Läuft ohne spezielle Grafikkarte auf jedem 64-Bit-Windows-PC (Windows 10/11).
 
 ## Arbeitsablauf im Programm
 
-1. *Maßstabsbogen als PDF speichern* → mit **100 % / tatsächliche Größe** drucken, die 100-mm-Kontrolllinie nachmessen.
+1. Format wählen (**A4** für Teile bis ca. 9 cm, **A3** bis ca. 13 cm Grundfläche) → *Bogen als PDF speichern* → mit **100 % / tatsächliche Größe** drucken, die 100-mm-Kontrolllinie nachmessen. A3 ohne eigenen Drucker: im Copyshop drucken lassen.
 2. Teil in die Mitte des Bogens stellen und 40–100 Fotos rundherum machen (Tab **Anleitung** im Programm).
 3. Fotos ins Fenster ziehen → **3D-Modell erstellen**.
 4. Ergebnis: `modell.stl` (und `modell.obj`) → *Im Slicer öffnen* oder *STL speichern unter…*
